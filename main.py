@@ -14,6 +14,13 @@ import rules
 import regis
 
 
+def make_user_input_func(player_name: str):
+    def _input(_: str) -> str:
+        return input(f"🎤 你现在以 {player_name} 的身份发言，不是 Mr. Owl。请输入你的回复：")
+
+    return _input
+
+
 def build_vote_tool(voter_name: str):
     def cast_vote(target: str):
         """白天投票给一名存活玩家。参数示例：P3。"""
@@ -32,13 +39,14 @@ def alive_players():
     return rules.alive_players()
 
 
-def prompt_user_target(prompt: str, excluded=None, allow_skip: bool = True):
+def prompt_user_target(prompt: str, excluded=None, allow_skip: bool = True, actor_name: str | None = None):
     excluded = set(excluded or [])
     while True:
         options = [name for name in alive_players() if name not in excluded]
         if not options:
             return None
-        raw = input(f"{prompt} ({', '.join(options)})：").strip()
+        actor_prefix = f"🎯 你现在以 {actor_name} 的身份执行：" if actor_name else ""
+        raw = input(f"{actor_prefix}{prompt} ({', '.join(options)})：").strip()
         if not raw and allow_skip:
             return None
         if raw in options:
@@ -48,6 +56,34 @@ def prompt_user_target(prompt: str, excluded=None, allow_skip: bool = True):
 
 def print_alive_banner():
     print(f"🕯️ 当前存活：{', '.join(alive_players())}")
+
+
+def display_chat_message(prefix: str, msg, system_label: str = "系统任务") -> None:
+    if not msg.content:
+        return
+    source = system_label if msg.source == "user" else msg.source
+    print(f"{prefix} {source}: {msg.content}")
+
+
+def build_player_prompt(seat_no: str, role_info: dict, teammates=None) -> str:
+    persona = get_role_persona(role_info["role_name"])
+    prompt_lines = [
+        RUSTY_STYLE.strip(),
+        f"你是座位 {seat_no}。",
+        f"你的身份是【{role_info['role_name']}】。阵营：{role_info['team']}。{role_info['desc']}",
+        f"你的个体底色：{persona['persona']}",
+        f"你的行为原则：{persona['behavior']}",
+        "你要像真实狼人杀玩家一样发言、推理、误导、自保和投票，不要把自己当成助手。",
+    ]
+    if teammates:
+        prompt_lines.append(
+            f"你的狼人队友是：{', '.join(teammates)}。夜晚请在密谈中合谋，并由其中一人执行工具。"
+        )
+    return "\n".join(prompt_lines)
+
+
+def build_god_prompt() -> str:
+    return f"{RUSTY_STYLE}\n你是上帝 Mr. Owl。负责主持夜晚、计票和判定。"
 
 
 async def main():
@@ -71,29 +107,17 @@ async def main():
         # --- 3. 实例化 Agent ---
         for no, char in zip(positions, selected_chars):
             is_me = (no == my_no)
-            persona = get_role_persona(char["role_id"])
-            prompt_text = (
-                f"{RUSTY_STYLE}\n"
-                f"你是座位 {no}，化身【{char['role_name']}】。{char['desc']}\n"
-                f"你的人设：{persona['persona']}\n"
-                f"你的说话风格：{persona['speaking_style']}\n"
-                f"你的行为原则：{persona['behavior']}"
-            )
-            
-            # 如果是狼人，注入队友信息
-            if char['team'] == "dark":
-                teammates = [n for n in dark_names if n != no]
-                prompt_text += f"\n你的狼人队友是：{', '.join(teammates)}。夜晚请在密谈中合谋，并由其中一人执行工具。"
+            teammates = [n for n in dark_names if n != no] if char["team"] == "dark" else []
 
             if is_me:
-                player = UserProxyAgent(name=no)
+                player = UserProxyAgent(name=no, input_func=make_user_input_func(no))
                 my_info = char
             else:
                 tools = list(char["tools"]) + [build_vote_tool(no)]
                 player = AssistantAgent(
                     name=no, 
-                    model_client=model_client, 
-                    system_message=prompt_text,
+                    model_client=model_client,
+                    system_message=build_player_prompt(no, char, teammates),
                     tools=tools
                 )
             
@@ -110,7 +134,7 @@ async def main():
         god = AssistantAgent(
             name="Mr_Owl",
             model_client=model_client,
-            system_message=f"{RUSTY_STYLE}\n你是上帝 Mr. Owl。负责主持夜晚、计票和判定。"
+            system_message=build_god_prompt()
         )
 
         # --- 4. 游戏流程 ---
@@ -141,9 +165,12 @@ async def main():
                 wolf_task = "商议献祭目标，只能针对存活好人。达成一致后由一人执行 extract_memory。"
                 if my_info["team"] == "dark" and is_alive(my_no):
                     async for msg in dark_team.run_stream(task=wolf_task):
-                        if msg.content:
-                            print(f"🔒 [低语] {msg.source}: {msg.content}")
-                    wolf_target = prompt_user_target("🌘 输入你最终要献祭的目标，留空沿用狼群决定", excluded=dark_alive)
+                        display_chat_message("🔒 [低语]", msg, system_label="密谋规则")
+                    wolf_target = prompt_user_target(
+                        "🌘 输入你最终要献祭的目标，留空沿用狼群决定",
+                        excluded=dark_alive,
+                        actor_name=my_no,
+                    )
                     if wolf_target:
                         print(regis.extract_memory(wolf_target))
                 else:
@@ -154,7 +181,7 @@ async def main():
             ida_no = role_to_player.get("Ida")
             if ida_no and is_alive(ida_no):
                 if ida_no == my_no:
-                    target = prompt_user_target("🔮 输入你要查验的目标", excluded={my_no})
+                    target = prompt_user_target("🔮 输入你要查验的目标", excluded={my_no}, actor_name=my_no)
                     if target:
                         print(regis.gaze_into_crystal(target))
                 else:
@@ -171,7 +198,7 @@ async def main():
                     if choice == "heal" and night_target != "无":
                         print(regis.laura_shift(night_target, "heal"))
                     elif choice == "poison":
-                        poison_target = prompt_user_target("☠️ 输入你要毒杀的目标", excluded=None)
+                        poison_target = prompt_user_target("☠️ 输入你要毒杀的目标", excluded=None, actor_name=my_no)
                         if poison_target:
                             print(regis.laura_shift(poison_target, "poison"))
                 else:
@@ -188,7 +215,7 @@ async def main():
             mary_no = role_to_player.get("Mary")
             if mary_no and is_alive(mary_no):
                 if mary_no == my_no:
-                    curse_target = prompt_user_target("🪶 输入你要诅咒的目标", excluded={my_no})
+                    curse_target = prompt_user_target("🪶 输入你要诅咒的目标", excluded={my_no}, actor_name=my_no)
                     if curse_target:
                         print(regis.mary_curse(curse_target))
                 else:
@@ -232,10 +259,11 @@ async def main():
             )
             async for msg in public_square.run_stream(task=debate_task, max_turns=max(10, len(alive_agents) * 2)):
                 if msg.content:
-                    print(f"\n📢 [广场] {msg.source}: {msg.content}")
+                    print()
+                display_chat_message("📢 [广场]", msg, system_label="仪式规则")
 
             if is_alive(my_no):
-                vote_target = prompt_user_target("🗳️ 输入你的投票目标，留空弃权", excluded=None)
+                vote_target = prompt_user_target("🗳️ 输入你的投票目标，留空弃权", excluded=None, actor_name=my_no)
                 if vote_target:
                     print(regis.cast_vote(my_no, vote_target))
 

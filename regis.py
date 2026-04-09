@@ -2,7 +2,7 @@ import rules
 
 
 def extract_memory(target: str):
-    """【腐败灵魂】夜晚选择一名存活的好人作为献祭目标。"""
+    """【腐败灵魂】夜晚引诱一名存活的好人一起沉入锈湖。"""
     ok, msg = rules.set_night_kill(target)
     if not ok:
         return msg
@@ -16,14 +16,14 @@ def laura_shift(target: str, form: str):
         ok, msg = rules.set_protected_target(target)
         if not ok:
             return msg
-        return f"【白光】：你守护了 {target}。"
+        return f"【繁花】：你守护了 {target}。"
 
     if form not in {"poison", "soul"}:
         return "未知的药剂形态。请使用 heal 或 poison。"
     ok, msg = rules.set_poison_target(target)
     if not ok:
         return msg
-    return f"【腐败】：你毒杀了 {target}。"
+    return f"【腐败】：你杀掉了 {target}。"
 
 
 def gaze_into_crystal(target: str):
@@ -39,7 +39,7 @@ def mary_curse(target: str):
     ok, msg = rules.set_cursed_player(target)
     if not ok:
         return msg
-    return f"【黑羽】：诅咒已落在 {target} 身上。"
+    return f"【天堂岛的诅咒】：诅咒已落在 {target} 身上。"
 
 
 def cast_vote(voter: str, target: str):
@@ -48,56 +48,3 @@ def cast_vote(voter: str, target: str):
     if not ok:
         return msg
     return f"【投票】：{voter} 把票投给了 {target}。"
-
-
-def resolve_night():
-    """结算夜晚死亡。"""
-    deaths = []
-
-    night_kill = RITUAL_STATE["night_kill"]
-    protected = RITUAL_STATE["protected_target"]
-    poison_target = RITUAL_STATE["poison_target"]
-
-    if night_kill != "无" and night_kill != protected:
-        deaths.append(night_kill)
-        _record_death(night_kill, "wolf")
-
-    if poison_target != "无":
-        if poison_target not in deaths:
-            deaths.append(poison_target)
-        _record_death(poison_target, "poison")
-
-    for target in deaths:
-        if target in RITUAL_STATE["alive_players"]:
-            RITUAL_STATE["alive_players"].remove(target)
-
-    return deaths
-
-
-def resolve_day():
-    """结算白天放逐。乌鸦诅咒为目标追加一票。"""
-    tally = {}
-    for target in RITUAL_STATE["votes"].values():
-        tally[target] = tally.get(target, 0) + 1
-
-    cursed = RITUAL_STATE["cursed_player"]
-    if cursed != "无" and cursed in RITUAL_STATE["alive_players"]:
-        tally[cursed] = tally.get(cursed, 0) + 1
-
-    if not tally:
-        RITUAL_STATE["cursed_player"] = "无"
-        return None, tally
-
-    top_votes = max(tally.values())
-    top_targets = [target for target, count in tally.items() if count == top_votes]
-    if len(top_targets) != 1:
-        RITUAL_STATE["cursed_player"] = "无"
-        return None, tally
-
-    eliminated = top_targets[0]
-    if eliminated in RITUAL_STATE["alive_players"]:
-        RITUAL_STATE["alive_players"].remove(eliminated)
-        _record_death(eliminated, "vote")
-
-    RITUAL_STATE["cursed_player"] = "无"
-    return eliminated, tally

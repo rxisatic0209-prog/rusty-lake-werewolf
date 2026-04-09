@@ -4,6 +4,8 @@ import random
 import regis
 
 
+# `role_id` 是狼人杀规则身份。
+# `role_name` 是这张身份牌在锈湖世界里的化身名字。
 WOLF_ROLE = {
     "role_id": "wolf",
     "role_name": "腐败灵魂",
@@ -53,6 +55,7 @@ LIGHT_ROLES = [
 
 
 def build_standard_role_pool():
+    """构造标准 6 人局身份池：2 狼 + 4 张随机好人身份牌。"""
     role_pool = [deepcopy(WOLF_ROLE), deepcopy(WOLF_ROLE)]
     role_pool.extend(deepcopy(role) for role in random.sample(LIGHT_ROLES, 4))
     random.shuffle(role_pool)
